@@ -125,6 +125,7 @@
   }
   .add-row input[type="text"], .add-row input[type="number"] { flex: 1 1 120px; }
   .add-row input[type="date"] { flex: 0 0 132px; }
+  .add-row input[type="time"] { flex: 0 0 96px; }
   .add-row select { flex: 0 0 112px; }
   .add-row input:focus, .add-row select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .add-row .btn { flex: 0 0 auto; width: auto; }
@@ -177,9 +178,12 @@
     display: inline-flex; align-items: center; justify-content: center;
   }
   .settings-hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.5; }
-  #telegram-ids-list label { margin-bottom: 8px; }
   .mic-btn.recording { background: var(--accent); color: #fff; animation: pulse 1s ease-in-out infinite; }
+  .voice-add-btn.recording { animation: pulse 1s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .5; } }
+  .input-with-mic { display: flex; gap: 8px; margin-top: 6px; }
+  .input-with-mic input { flex: 1; width: auto; margin-top: 0; }
+  .voice-add-btn { margin-bottom: 6px; }
 
   /* calendar */
   .event-card { display: flex; gap: 12px; align-items: flex-start; }
@@ -193,6 +197,10 @@
   .event-info { flex: 1; }
   .event-title { font-size: 14.5px; font-weight: 600; }
   .event-card.past { opacity: .5; }
+  .event-time-tag {
+    display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+    color: var(--text-muted);
+  }
   .event-today-tag {
     display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 700;
     color: var(--accent); border: 1px solid var(--accent); border-radius: 99px;
@@ -276,7 +284,10 @@
           <input type="number" id="meal-people" min="1" max="12" value="4">
         </label>
         <label>Пожелания (необязательно)
-          <input type="text" id="meal-prefs" placeholder="например: без мяса по средам, дети не едят острое">
+          <span class="input-with-mic">
+            <input type="text" id="meal-prefs" placeholder="например: без мяса по средам, дети не едят острое">
+            <button type="button" class="icon-btn mic-btn" id="meal-prefs-mic" aria-label="Сказать пожелания" title="Сказать пожелания">🎤</button>
+          </span>
         </label>
         <button class="btn btn-accent" id="generate-meal-plan">Составить меню на неделю</button>
       </div>
@@ -287,18 +298,6 @@
       <div class="panel-header">
         <h2>Дела по дому</h2>
         <p>Кто и что делает на этой неделе</p>
-      </div>
-      <div class="surface-card">
-        <label>Члены семьи (через запятую)
-          <input type="text" id="family-members-input" placeholder="например: Мама, Папа, Лев">
-        </label>
-      </div>
-      <div class="surface-card">
-        <label>Адрес сервера для уведомлений (необязательно)
-          <input type="text" id="telegram-backend-url" placeholder="https://ваш-сервер.up.railway.app">
-        </label>
-        <div id="telegram-ids-list"></div>
-        <p class="settings-hint">Чтобы новые дела приходили в Telegram, попросите каждого написать что-нибудь вашему боту, узнайте его ID и впишите рядом с именем.</p>
       </div>
       <form class="add-row" id="add-chore-form">
         <input type="text" id="chore-text" placeholder="Новое дело">
@@ -318,6 +317,7 @@
       </div>
       <form class="add-row" id="add-shopping-form">
         <input type="text" id="shopping-text" placeholder="например: молоко">
+        <button type="button" class="icon-btn mic-btn" id="shopping-mic" aria-label="Сказать товар" title="Сказать товар">🎤</button>
         <button type="submit" class="btn btn-accent">+</button>
       </form>
       <div id="shopping-list"></div>
@@ -329,10 +329,12 @@
         <h2>Календарь</h2>
         <p>Важные даты и события семьи</p>
       </div>
+      <button type="button" class="btn btn-accent voice-add-btn" id="event-voice-add">🎤 Сказать дату и событие</button>
+      <p class="settings-hint">Например: «В субботу в 15:00 день рождения у бабушки»</p>
       <form class="add-row" id="add-event-form">
         <input type="date" id="event-date-input">
+        <input type="time" id="event-time-input">
         <input type="text" id="event-title-input" placeholder="например: День рождения">
-        <button type="button" class="icon-btn mic-btn" id="event-mic" aria-label="Сказать событие" title="Сказать событие">🎤</button>
         <button type="submit" class="btn btn-accent">+</button>
       </form>
       <div id="event-list"></div>
@@ -348,6 +350,7 @@
       <div class="chat-window" id="chat-window"></div>
       <form class="add-row" id="chat-form">
         <input type="text" id="chat-input" placeholder="Напишите сообщение...">
+        <button type="button" class="icon-btn mic-btn" id="chat-mic" aria-label="Сказать сообщение" title="Сказать сообщение">🎤</button>
         <button type="submit" class="btn btn-accent">→</button>
       </form>
     </section>
@@ -451,37 +454,51 @@
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
-  function icsDateRange(dateStr) {
-    var start = dateStr.replace(/-/g, '');
-    var d = new Date(dateStr + 'T00:00:00');
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function icsDateRange(ev) {
+    if (ev.time) {
+      var start = new Date(ev.date + 'T' + ev.time + ':00');
+      var end = new Date(start.getTime() + 60 * 60 * 1000);
+      var startStr = ev.date.replace(/-/g, '') + 'T' + ev.time.replace(':', '') + '00';
+      var endStr = end.getFullYear() + pad2(end.getMonth() + 1) + pad2(end.getDate()) + 'T' + pad2(end.getHours()) + pad2(end.getMinutes()) + '00';
+      return { start: startStr, end: endStr, allDay: false };
+    }
+    var startDate = ev.date.replace(/-/g, '');
+    var d = new Date(ev.date + 'T00:00:00');
     d.setDate(d.getDate() + 1);
-    var end = d.toISOString().slice(0,10).replace(/-/g, '');
-    return { start: start, end: end };
+    var endDate = d.toISOString().slice(0,10).replace(/-/g, '');
+    return { start: startDate, end: endDate, allDay: true };
   }
   function eventToICS(ev) {
-    var range = icsDateRange(ev.date);
+    var range = icsDateRange(ev);
     var stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    return [
-      'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Семейный помощник//RU',
-      'BEGIN:VEVENT',
-      'UID:' + ev.id + '@semeyniy-pomoshnik',
-      'DTSTAMP:' + stamp,
-      'DTSTART;VALUE=DATE:' + range.start,
-      'DTEND;VALUE=DATE:' + range.end,
-      'SUMMARY:' + String(ev.title || '').replace(/[\r\n]+/g, ' '),
-      'END:VEVENT','END:VCALENDAR'
-    ].join('\r\n');
+    var lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Семейный помощник//RU','BEGIN:VEVENT','UID:' + ev.id + '@semeyniy-pomoshnik','DTSTAMP:' + stamp];
+    if (range.allDay) {
+      lines.push('DTSTART;VALUE=DATE:' + range.start);
+      lines.push('DTEND;VALUE=DATE:' + range.end);
+    } else {
+      lines.push('DTSTART:' + range.start);
+      lines.push('DTEND:' + range.end);
+    }
+    lines.push('SUMMARY:' + String(ev.title || '').replace(/[\r\n]+/g, ' '));
+    lines.push('END:VEVENT','END:VCALENDAR');
+    return lines.join('\r\n');
   }
   function allEventsToICS(events) {
     var stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     var lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Семейный помощник//RU'];
     events.forEach(function (ev) {
-      var range = icsDateRange(ev.date);
+      var range = icsDateRange(ev);
       lines.push('BEGIN:VEVENT');
       lines.push('UID:' + ev.id + '@semeyniy-pomoshnik');
       lines.push('DTSTAMP:' + stamp);
-      lines.push('DTSTART;VALUE=DATE:' + range.start);
-      lines.push('DTEND;VALUE=DATE:' + range.end);
+      if (range.allDay) {
+        lines.push('DTSTART;VALUE=DATE:' + range.start);
+        lines.push('DTEND;VALUE=DATE:' + range.end);
+      } else {
+        lines.push('DTSTART:' + range.start);
+        lines.push('DTEND:' + range.end);
+      }
       lines.push('SUMMARY:' + String(ev.title || '').replace(/[\r\n]+/g, ' '));
       lines.push('END:VEVENT');
     });
@@ -489,7 +506,7 @@
     return lines.join('\r\n');
   }
   function gcalLink(ev) {
-    var range = icsDateRange(ev.date);
+    var range = icsDateRange(ev);
     return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' +
       encodeURIComponent(ev.title) + '&dates=' + range.start + '/' + range.end;
   }
@@ -557,6 +574,10 @@
       body: JSON.stringify(payload)
     });
     var data = await response.json();
+    if (data.error) {
+      var msg = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
+      throw new Error(msg);
+    }
     var blocks = (data.content || []).filter(function (b) { return b.type === 'text'; });
     return blocks.length ? blocks[blocks.length - 1].text : '';
   }
@@ -573,6 +594,10 @@
       })
     });
     var data = await response.json();
+    if (data.error) {
+      var msg2 = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
+      throw new Error(msg2);
+    }
     var blocks = (data.content || []).filter(function (b) { return b.type === 'text'; });
     return blocks.length ? blocks[blocks.length - 1].text : '';
   }
@@ -685,7 +710,7 @@
       );
       d.recipe = parseJSON(text);
     } catch (e) {
-      d.recipe = { ingredients: [], steps: ['Не получилось загрузить рецепт. Попробуйте ещё раз.'] };
+      d.recipe = { ingredients: [], steps: ['Не получилось загрузить рецепт. Попробуйте ещё раз.', (e.message || '')] };
     }
     d.recipeLoading = false;
     renderMeals();
@@ -738,7 +763,7 @@
       await saveKey('mealPlan', state.mealPlan);
       renderMeals();
     } catch (e) {
-      alert('Не получилось составить меню. Попробуйте ещё раз.');
+      alert('Не получилось составить меню. Попробуйте ещё раз.\n\n' + (e.message || ''));
     }
     btn.disabled = false;
     btn.textContent = 'Составить меню на неделю';
@@ -751,28 +776,7 @@
       state.familyMembers.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + '</option>'; }).join('');
   }
 
-  function renderTelegramSettings() {
-    document.getElementById('telegram-backend-url').value = state.telegramBackendUrl || '';
-    var container = document.getElementById('telegram-ids-list');
-    if (state.familyMembers.length === 0) {
-      container.innerHTML = '';
-      return;
-    }
-    container.innerHTML = state.familyMembers.map(function (name) {
-      var val = state.telegramChatIds[name] || '';
-      return '<label>Telegram ID — ' + esc(name) +
-        '<input type="text" data-member="' + esc(name) + '" class="telegram-id-input" value="' + esc(val) + '" placeholder="например: 123456789"></label>';
-    }).join('');
-    container.querySelectorAll('.telegram-id-input').forEach(function (input) {
-      input.addEventListener('change', async function () {
-        state.telegramChatIds[input.dataset.member] = input.value.trim();
-        await saveKey('telegramChatIds', state.telegramChatIds);
-      });
-    });
-  }
-
   function renderChores() {
-    document.getElementById('family-members-input').value = state.familyMembers.join(', ');
     updateAssigneeOptions();
     var container = document.getElementById('chore-list');
     if (state.chores.length === 0) {
@@ -820,14 +824,6 @@
     if (assignee) notifyTelegram(assignee, 'Новое дело по дому: ' + text);
   }
 
-  async function onFamilyMembersChange() {
-    var raw = document.getElementById('family-members-input').value;
-    state.familyMembers = raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-    await saveKey('familyMembers', state.familyMembers);
-    updateAssigneeOptions();
-    renderTelegramSettings();
-  }
-
   async function onResetWeekChores() {
     state.chores.forEach(function (c) { c.done = false; });
     await saveKey('chores', state.chores);
@@ -859,7 +855,7 @@
       renderChores();
       notifyAllAssignees();
     } catch (e) {
-      alert('Не получилось распределить дела. Попробуйте ещё раз.');
+      alert('Не получилось распределить дела. Попробуйте ещё раз.\n\n' + (e.message || ''));
     }
     btn.disabled = false;
     btn.innerHTML = '🤖 Распределить дела с помощью ИИ';
@@ -934,7 +930,9 @@
         '<div class="note-accent"></div>' +
         '<div class="event-date-badge"><span class="dom">' + d.getDate() + '</span>' + MONTHS[d.getMonth()].slice(0,3) + '</div>' +
         '<div class="event-info">' +
-          '<span class="event-title">' + esc(ev.title) + '</span>' + (isToday ? '<span class="event-today-tag">Сегодня</span>' : '') +
+          '<span class="event-title">' + esc(ev.title) + '</span>' +
+          (ev.time ? '<span class="event-time-tag">' + esc(ev.time) + '</span>' : '') +
+          (isToday ? '<span class="event-today-tag">Сегодня</span>' : '') +
         '</div>' +
         '<a class="icon-btn" href="' + gcalLink(ev) + '" target="_blank" rel="noopener" aria-label="Открыть в Google Календаре" title="Добавить в Google Календарь">📆</a>' +
         '<button class="icon-btn ics-btn" data-id="' + ev.id + '" aria-label="Скачать .ics" title="Скачать файл календаря">📅</button>' +
@@ -961,12 +959,15 @@
   async function onAddEvent(e) {
     e.preventDefault();
     var dateInput = document.getElementById('event-date-input');
+    var timeInput = document.getElementById('event-time-input');
     var titleInput = document.getElementById('event-title-input');
     var date = dateInput.value;
+    var time = timeInput.value;
     var title = titleInput.value.trim();
     if (!date || !title) return;
-    state.events.push({ id: uid(), date: date, title: title });
+    state.events.push({ id: uid(), date: date, time: time, title: title });
     titleInput.value = '';
+    timeInput.value = '';
     await saveKey('events', state.events);
     renderEvents();
   }
@@ -1012,7 +1013,6 @@
     await loadAll();
     renderMeals();
     renderChores();
-    renderTelegramSettings();
     renderShopping();
     renderEvents();
 
@@ -1021,7 +1021,6 @@
 
     document.getElementById('generate-meal-plan').addEventListener('click', onGenerateMealPlan);
     document.getElementById('add-chore-form').addEventListener('submit', onAddChore);
-    document.getElementById('family-members-input').addEventListener('change', onFamilyMembersChange);
     document.getElementById('reset-week-chores').addEventListener('click', onResetWeekChores);
     document.getElementById('ai-distribute-chores').addEventListener('click', onAiDistributeChores);
     document.getElementById('add-shopping-form').addEventListener('submit', onAddShoppingItem);
@@ -1031,11 +1030,9 @@
       if (state.events.length === 0) { alert('Список событий пуст.'); return; }
       downloadICS('semeyniy-kalendar.ics', allEventsToICS(state.events));
     });
-    document.getElementById('telegram-backend-url').addEventListener('change', async function () {
-      state.telegramBackendUrl = this.value.trim();
-      await saveKey('telegramBackendUrl', state.telegramBackendUrl);
-    });
+    document.getElementById('chat-form').addEventListener('submit', onChatSubmit);
 
+    // ---- Voice input ----
     document.getElementById('chore-mic').addEventListener('click', function () {
       var btn = this;
       startVoiceInput(btn, function (text) {
@@ -1043,28 +1040,59 @@
       });
     });
 
-    document.getElementById('event-mic').addEventListener('click', function () {
+    document.getElementById('shopping-mic').addEventListener('click', function () {
       var btn = this;
+      startVoiceInput(btn, function (text) {
+        document.getElementById('shopping-text').value = text;
+      });
+    });
+
+    document.getElementById('meal-prefs-mic').addEventListener('click', function () {
+      var btn = this;
+      startVoiceInput(btn, function (text) {
+        document.getElementById('meal-prefs').value = text;
+      });
+    });
+
+    document.getElementById('chat-mic').addEventListener('click', function () {
+      var btn = this;
+      startVoiceInput(btn, function (text) {
+        document.getElementById('chat-input').value = text;
+      });
+    });
+
+    // One-tap voice add for the calendar: say a date (and optionally time) and
+    // a short description, and the event is added straight away.
+    document.getElementById('event-voice-add').addEventListener('click', function () {
+      var btn = this;
+      var originalLabel = btn.textContent;
       startVoiceInput(btn, async function (text) {
-        var titleInput = document.getElementById('event-title-input');
-        var dateInput = document.getElementById('event-date-input');
-        titleInput.value = text;
+        btn.innerHTML = '<span class="spinner"></span>Распознаю...';
         try {
-          var todayStr = new Date().toISOString().slice(0,10);
+          var now = new Date();
+          var todayStr = now.toISOString().slice(0,10);
+          var weekday = WEEKDAYS[now.getDay()];
           var resultText = await callClaude(
-            'Ты помогаешь распознать дату и название события из голосовой фразы на русском. Сегодня ' + todayStr + '. Если год не назван, выбери ближайшую будущую дату с этим числом и месяцем. Ответь ТОЛЬКО JSON: {"date":"YYYY-MM-DD","title":"короткое название события"}.',
+            'Ты помогаешь распознать дату, время и короткое название события из голосовой фразы на русском. Сегодня ' + weekday + ', ' + todayStr + '. Если время не упомянуто, верни пустую строку для time. Если год не назван, выбери ближайшую будущую дату с этим числом и месяцем (или днём недели). Ответь ТОЛЬКО JSON без пояснений: {"date":"YYYY-MM-DD","time":"HH:MM или пусто","title":"короткое название события"}',
             text,
             300
           );
           var parsed = parseJSON(resultText);
-          if (parsed.date) dateInput.value = parsed.date;
-          if (parsed.title) titleInput.value = parsed.title;
+          if (parsed.date && parsed.title) {
+            state.events.push({ id: uid(), date: parsed.date, time: parsed.time || '', title: parsed.title });
+            await saveKey('events', state.events);
+            renderEvents();
+            document.getElementById('event-date-input').value = parsed.date;
+            document.getElementById('event-time-input').value = parsed.time || '';
+          } else {
+            alert('Не получилось распознать дату. Попробуйте ещё раз или впишите вручную.');
+          }
         } catch (e) {
-          // Keep the raw transcript in the title field if parsing fails
+          alert('Не получилось распознать. Попробуйте ещё раз.\n\n' + (e.message || ''));
         }
+        btn.textContent = originalLabel;
       });
     });
-    document.getElementById('chat-form').addEventListener('submit', onChatSubmit);
   }
 
   init();
