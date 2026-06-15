@@ -193,6 +193,13 @@
     display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
     text-transform: none; color: var(--text-muted);
   }
+  .recipe-actions { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  .star-btn {
+    border: none; background: none; cursor: pointer; font-size: 22px; line-height: 1;
+    padding: 2px 6px; opacity: .3; filter: grayscale(1); transition: transform .1s ease;
+  }
+  .star-btn.favorited { opacity: 1; filter: none; }
+  .star-btn:active { transform: scale(0.9); }
 
   /* calendar */
   .event-card { display: flex; gap: 12px; align-items: flex-start; }
@@ -288,7 +295,7 @@
         <h2>Меню на неделю</h2>
         <p>Ужины для всей семьи — чтобы не думать каждый день «а что готовить»</p>
       </div>
-      <div class="surface-card">
+      <div class="surface-card" id="meal-settings-card">
         <label>Что планировать?
           <span class="meal-type-toggles">
             <label><input type="checkbox" class="meal-type-cb" value="breakfast"> Завтрак</label>
@@ -307,6 +314,7 @@
         </label>
         <button class="btn btn-accent" id="generate-meal-plan">Составить меню на неделю</button>
       </div>
+      <button class="btn btn-ghost" id="show-favorites">⭐ Избранные рецепты</button>
       <div id="meal-plan-list"></div>
     </section>
 
@@ -419,6 +427,7 @@
   var state = {
     mealPlan: null,
     mealTypes: ['dinner'],
+    favorites: [],
     mealPeople: 4,
     mealPrefs: '',
     chores: [],
@@ -444,6 +453,7 @@
   async function loadAll() {
     state.mealPlan = await loadKey('mealPlan', null);
     state.mealTypes = await loadKey('mealTypes', ['dinner']);
+    state.favorites = await loadKey('favorites', []);
     // Migrate old format where mealPlan[day] was a single meal ({dish, short, ...})
     // instead of {breakfast: {...}, lunch: {...}, dinner: {...}}.
     if (state.mealPlan && state.mealPlan[DAYS[0]] && typeof state.mealPlan[DAYS[0]].dish !== 'undefined') {
@@ -672,11 +682,51 @@
   // ============ MEALS ============
   function renderMeals() {
     var container = document.getElementById('meal-plan-list');
+    var settingsCard = document.getElementById('meal-settings-card');
+    var favBtn = document.getElementById('show-favorites');
     document.getElementById('meal-people').value = state.mealPeople;
     document.getElementById('meal-prefs').value = state.mealPrefs;
     document.querySelectorAll('.meal-type-cb').forEach(function (cb) {
       cb.checked = state.mealTypes.indexOf(cb.value) !== -1;
     });
+
+    if (mealsView === 'favorites') {
+      settingsCard.style.display = 'none';
+      favBtn.textContent = '← К меню на неделю';
+      if (state.favorites.length === 0) {
+        container.innerHTML = '<div class="empty-state"><span>⭐</span>Пока нет избранных рецептов.<br>Откройте рецепт в меню и нажмите ⭐, чтобы сохранить его сюда.</div>';
+        return;
+      }
+      container.innerHTML = state.favorites.map(function (fav) {
+        return '' +
+        '<div class="note-card day-card">' +
+          '<div class="note-accent"></div>' +
+          '<div class="note-head">' +
+            '<h3 class="dish-name">' + esc(fav.dish) + '</h3>' +
+            '<p class="dish-short">' + esc(fav.short) + '</p>' +
+          '</div>' +
+          '<div class="recipe-body">' +
+            '<div class="recipe-actions">' +
+              '<button class="star-btn favorited" data-fav-id="' + fav.id + '" title="Убрать из избранного">⭐</button>' +
+            '</div>' +
+            renderRecipeBody(fav.recipe) +
+            '<button class="btn btn-ghost add-to-shopping-fav" data-fav-id="' + fav.id + '">Добавить продукты в список покупок</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      container.querySelectorAll('.star-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { removeFavorite(btn.dataset.favId); });
+      });
+      container.querySelectorAll('.add-to-shopping-fav').forEach(function (btn) {
+        btn.addEventListener('click', function () { addFavoriteToShopping(btn.dataset.favId); });
+      });
+      return;
+    }
+
+    settingsCard.style.display = '';
+    favBtn.textContent = '⭐ Избранные рецепты';
+
     if (!state.mealPlan) {
       var typesText = state.mealTypes.map(function (t) { return MEAL_TYPE_LABELS[t].toLowerCase(); }).join(', ');
       container.innerHTML = '<div class="empty-state"><span>🍲</span>Меню пока не составлено.<br>Нажмите «Составить меню», и помощник предложит ' + esc(typesText) + ' на всю неделю.</div>';
@@ -694,7 +744,14 @@
           if (d.recipeLoading) {
             recipeHtml = '<div class="recipe-body"><span class="spinner"></span>Загружаю рецепт...</div>';
           } else if (d.recipe) {
-            recipeHtml = renderRecipe(d.recipe);
+            var isFav = state.favorites.some(function (f) { return f.dish === d.dish; });
+            recipeHtml = '<div class="recipe-body">' +
+              '<div class="recipe-actions">' +
+                '<button class="star-btn' + (isFav ? ' favorited' : '') + '" data-day="' + day + '" data-meal="' + mt + '" title="В избранное">⭐</button>' +
+              '</div>' +
+              renderRecipeBody(d.recipe) +
+              '<button class="btn btn-ghost add-to-shopping">Добавить продукты в список покупок</button>' +
+            '</div>';
           }
         }
         cards.push('' +
@@ -715,26 +772,54 @@
     container.querySelectorAll('.recipe-toggle').forEach(function (btn) {
       btn.addEventListener('click', function () { onRecipeToggle(btn.dataset.day, btn.dataset.meal); });
     });
+    container.querySelectorAll('.add-to-shopping').forEach(function (btn) {
+      var card = btn.closest('.day-card');
+      btn.addEventListener('click', function () { addRecipeToShopping(card.dataset.day, card.dataset.meal); });
+    });
+    container.querySelectorAll('.star-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { toggleFavorite(btn.dataset.day, btn.dataset.meal); });
+    });
   }
 
-  function renderRecipe(recipe) {
+  function renderRecipeBody(recipe) {
     var ing = (recipe.ingredients || []).map(function (i) {
       return '<li>' + esc(i.name) + (i.amount ? ' — ' + esc(i.amount) : '') + '</li>';
     }).join('');
     var steps = (recipe.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('');
-    return '' +
-    '<div class="recipe-body">' +
-      '<h4>Продукты</h4>' +
-      '<ul>' + ing + '</ul>' +
-      '<h4>Как готовить</h4>' +
-      '<ol>' + steps + '</ol>' +
-      '<button class="btn btn-ghost add-to-shopping">Добавить продукты в список покупок</button>' +
-    '</div>';
+    return '<h4>Продукты</h4><ul>' + ing + '</ul><h4>Как готовить</h4><ol>' + steps + '</ol>';
   }
 
-  function attachAddToShopping(day, meal) {
-    var btn = document.querySelector('.day-card[data-day="' + day + '"][data-meal="' + meal + '"] .add-to-shopping');
-    if (btn) btn.addEventListener('click', function () { addRecipeToShopping(day, meal); });
+  async function toggleFavorite(day, meal) {
+    var d = state.mealPlan[day][meal];
+    var idx = state.favorites.findIndex(function (f) { return f.dish === d.dish; });
+    if (idx !== -1) {
+      state.favorites.splice(idx, 1);
+    } else {
+      state.favorites.push({ id: uid(), dish: d.dish, short: d.short, recipe: d.recipe });
+    }
+    await saveKey('favorites', state.favorites);
+    renderMeals();
+  }
+
+  async function removeFavorite(favId) {
+    state.favorites = state.favorites.filter(function (f) { return f.id !== favId; });
+    await saveKey('favorites', state.favorites);
+    renderMeals();
+  }
+
+  async function addFavoriteToShopping(favId) {
+    var fav = state.favorites.find(function (f) { return f.id === favId; });
+    if (!fav || !fav.recipe) return;
+    (fav.recipe.ingredients || []).forEach(function (i) {
+      state.shoppingList.push({ id: uid(), text: i.amount ? (i.name + ' — ' + i.amount) : i.name, done: false });
+    });
+    await saveKey('shoppingList', state.shoppingList);
+    renderShopping();
+    var btn = document.querySelector('.add-to-shopping-fav[data-fav-id="' + favId + '"]');
+    if (btn) {
+      btn.textContent = 'Добавлено ✓';
+      setTimeout(function () { btn.textContent = 'Добавить продукты в список покупок'; }, 1500);
+    }
   }
 
   async function onRecipeToggle(day, meal) {
@@ -748,7 +833,6 @@
     d.recipeVisible = true;
     if (d.recipe) {
       renderMeals();
-      attachAddToShopping(day, meal);
       await saveKey('mealPlan', state.mealPlan);
       return;
     }
@@ -770,7 +854,6 @@
     }
     d.recipeLoading = false;
     renderMeals();
-    attachAddToShopping(day, meal);
     await saveKey('mealPlan', state.mealPlan);
   }
 
@@ -1038,6 +1121,7 @@
 
   // ============ ASK ============
   var chatHistory = [];
+  var mealsView = 'plan';
   function renderChatMessage(role, text) {
     var win = document.getElementById('chat-window');
     var bubble = document.createElement('div');
@@ -1084,6 +1168,10 @@
     renderChatMessage('assistant', 'Привет! Спросите меня о рецептах, домашних советах или о чём угодно — постараюсь помочь.');
 
     document.getElementById('generate-meal-plan').addEventListener('click', onGenerateMealPlan);
+    document.getElementById('show-favorites').addEventListener('click', function () {
+      mealsView = (mealsView === 'plan') ? 'favorites' : 'plan';
+      renderMeals();
+    });
     document.querySelectorAll('.meal-type-cb').forEach(function (cb) {
       cb.addEventListener('change', async function () {
         var checked = [];
