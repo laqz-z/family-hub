@@ -184,6 +184,15 @@
   .input-with-mic { display: flex; gap: 8px; margin-top: 6px; }
   .input-with-mic input { flex: 1; width: auto; margin-top: 0; }
   .voice-add-btn { margin-bottom: 6px; }
+  .meal-type-toggles { display: flex; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
+  .meal-type-toggles label {
+    display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; color: var(--text);
+  }
+  .meal-type-toggles input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); }
+  .meal-type-tag {
+    display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+    text-transform: none; color: var(--text-muted);
+  }
 
   /* calendar */
   .event-card { display: flex; gap: 12px; align-items: flex-start; }
@@ -280,6 +289,13 @@
         <p>Ужины для всей семьи — чтобы не думать каждый день «а что готовить»</p>
       </div>
       <div class="surface-card">
+        <label>Что планировать?
+          <span class="meal-type-toggles">
+            <label><input type="checkbox" class="meal-type-cb" value="breakfast"> Завтрак</label>
+            <label><input type="checkbox" class="meal-type-cb" value="lunch"> Обед</label>
+            <label><input type="checkbox" class="meal-type-cb" value="dinner" checked> Ужин</label>
+          </span>
+        </label>
         <label>На сколько человек готовим?
           <input type="number" id="meal-people" min="1" max="12" value="4">
         </label>
@@ -296,16 +312,16 @@
 
     <section class="tab-panel" id="tab-chores" style="--accent: var(--accent-chores); --accent-tint: var(--accent-chores-tint);">
       <div class="panel-header">
-        <h2>Дела по дому</h2>
-        <p>Кто и что делает на этой неделе</p>
+        <h2>Задания</h2>
+        <p>Кто что делает на этой неделе</p>
       </div>
       <form class="add-row" id="add-chore-form">
-        <input type="text" id="chore-text" placeholder="Новое дело">
-        <button type="button" class="icon-btn mic-btn" id="chore-mic" aria-label="Сказать дело" title="Сказать дело">🎤</button>
+        <input type="text" id="chore-text" placeholder="Новое задание">
+        <button type="button" class="icon-btn mic-btn" id="chore-mic" aria-label="Сказать задание" title="Сказать задание">🎤</button>
         <select id="chore-assignee"></select>
         <button type="submit" class="btn btn-accent">+</button>
       </form>
-      <button class="btn btn-ai" id="ai-distribute-chores">🤖 Распределить дела с помощью ИИ</button>
+      <button class="btn btn-ai" id="ai-distribute-chores">🤖 Распределить задания с помощью ИИ</button>
       <div id="chore-list"></div>
       <button class="btn btn-ghost" id="reset-week-chores">Начать новую неделю</button>
     </section>
@@ -364,7 +380,7 @@
     </button>
     <button class="tab-btn" data-tab="chores" style="--accent: var(--accent-chores); --accent-tint: var(--accent-chores-tint);">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M7.5 8.5l1.5 1.5L12 7"/><line x1="8" y1="14.5" x2="16" y2="14.5"/><line x1="8" y1="17.5" x2="13" y2="17.5"/></svg>
-      <span>Дела</span>
+      <span>Задания</span>
     </button>
     <button class="tab-btn" data-tab="shopping" style="--accent: var(--accent-shopping); --accent-tint: var(--accent-shopping-tint);">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16l-1.4 11a2 2 0 0 1-2 1.7H7.4a2 2 0 0 1-2-1.7L4 8z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/></svg>
@@ -388,6 +404,8 @@
     monday: 'Понедельник', tuesday: 'Вторник', wednesday: 'Среда',
     thursday: 'Четверг', friday: 'Пятница', saturday: 'Суббота', sunday: 'Воскресенье'
   };
+  var MEAL_TYPES_ORDER = ['breakfast','lunch','dinner'];
+  var MEAL_TYPE_LABELS = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин' };
   var MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   var WEEKDAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
 
@@ -400,6 +418,7 @@
   // ---------- State ----------
   var state = {
     mealPlan: null,
+    mealTypes: ['dinner'],
     mealPeople: 4,
     mealPrefs: '',
     chores: [],
@@ -424,6 +443,12 @@
   }
   async function loadAll() {
     state.mealPlan = await loadKey('mealPlan', null);
+    state.mealTypes = await loadKey('mealTypes', ['dinner']);
+    // Migrate old format where mealPlan[day] was a single meal ({dish, short, ...})
+    // instead of {breakfast: {...}, lunch: {...}, dinner: {...}}.
+    if (state.mealPlan && state.mealPlan[DAYS[0]] && typeof state.mealPlan[DAYS[0]].dish !== 'undefined') {
+      state.mealPlan = null;
+    }
     state.mealPeople = await loadKey('mealPeople', 4);
     state.mealPrefs = await loadKey('mealPrefs', '');
     state.chores = await loadKey('chores', []);
@@ -558,7 +583,7 @@
       }
     });
     for (var name in byPerson) {
-      await notifyTelegram(name, 'Твои дела по дому на этой неделе:\n— ' + byPerson[name].join('\n— '));
+      await notifyTelegram(name, 'Твои задания на этой неделе:\n— ' + byPerson[name].join('\n— '));
     }
   }
 
@@ -614,6 +639,16 @@
     }
     return JSON.parse(clean);
   }
+  function parseJSONArray(text) {
+    var clean = text.trim();
+    clean = clean.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+    var start = clean.indexOf('[');
+    var end = clean.lastIndexOf(']');
+    if (start !== -1 && end !== -1 && end > start) {
+      clean = clean.slice(start, end + 1);
+    }
+    return JSON.parse(clean);
+  }
 
   // ---------- Tabs ----------
   function initTabs() {
@@ -639,36 +674,46 @@
     var container = document.getElementById('meal-plan-list');
     document.getElementById('meal-people').value = state.mealPeople;
     document.getElementById('meal-prefs').value = state.mealPrefs;
+    document.querySelectorAll('.meal-type-cb').forEach(function (cb) {
+      cb.checked = state.mealTypes.indexOf(cb.value) !== -1;
+    });
     if (!state.mealPlan) {
-      container.innerHTML = '<div class="empty-state"><span>🍲</span>Меню пока не составлено.<br>Нажмите «Составить меню», и помощник предложит ужины на всю неделю.</div>';
+      var typesText = state.mealTypes.map(function (t) { return MEAL_TYPE_LABELS[t].toLowerCase(); }).join(', ');
+      container.innerHTML = '<div class="empty-state"><span>🍲</span>Меню пока не составлено.<br>Нажмите «Составить меню», и помощник предложит ' + esc(typesText) + ' на всю неделю.</div>';
       return;
     }
-    container.innerHTML = DAYS.map(function (day) {
-      var d = state.mealPlan[day];
-      if (!d) return '';
-      var recipeHtml = '';
-      if (d.recipeVisible) {
-        if (d.recipeLoading) {
-          recipeHtml = '<div class="recipe-body"><span class="spinner"></span>Загружаю рецепт...</div>';
-        } else if (d.recipe) {
-          recipeHtml = renderRecipe(d.recipe);
+    var cards = [];
+    DAYS.forEach(function (day) {
+      var dayPlan = state.mealPlan[day];
+      if (!dayPlan) return;
+      MEAL_TYPES_ORDER.forEach(function (mt) {
+        var d = dayPlan[mt];
+        if (!d) return;
+        var recipeHtml = '';
+        if (d.recipeVisible) {
+          if (d.recipeLoading) {
+            recipeHtml = '<div class="recipe-body"><span class="spinner"></span>Загружаю рецепт...</div>';
+          } else if (d.recipe) {
+            recipeHtml = renderRecipe(d.recipe);
+          }
         }
-      }
-      return '' +
-      '<div class="note-card day-card" data-day="' + day + '">' +
-        '<div class="note-accent"></div>' +
-        '<div class="note-head">' +
-          '<span class="day-label">' + DAY_LABELS[day] + '</span>' +
-          '<h3 class="dish-name">' + esc(d.dish) + '</h3>' +
-          '<p class="dish-short">' + esc(d.short) + '</p>' +
-        '</div>' +
-        '<button class="recipe-toggle" data-day="' + day + '">' + (d.recipeVisible ? 'Скрыть рецепт' : 'Рецепт') + '</button>' +
-        recipeHtml +
-      '</div>';
-    }).join('');
+        cards.push('' +
+        '<div class="note-card day-card" data-day="' + day + '" data-meal="' + mt + '">' +
+          '<div class="note-accent"></div>' +
+          '<div class="note-head">' +
+            '<span class="day-label">' + DAY_LABELS[day] + '<span class="meal-type-tag">' + MEAL_TYPE_LABELS[mt] + '</span></span>' +
+            '<h3 class="dish-name">' + esc(d.dish) + '</h3>' +
+            '<p class="dish-short">' + esc(d.short) + '</p>' +
+          '</div>' +
+          '<button class="recipe-toggle" data-day="' + day + '" data-meal="' + mt + '">' + (d.recipeVisible ? 'Скрыть рецепт' : 'Рецепт') + '</button>' +
+          recipeHtml +
+        '</div>');
+      });
+    });
+    container.innerHTML = cards.join('');
 
     container.querySelectorAll('.recipe-toggle').forEach(function (btn) {
-      btn.addEventListener('click', function () { onRecipeToggle(btn.dataset.day); });
+      btn.addEventListener('click', function () { onRecipeToggle(btn.dataset.day, btn.dataset.meal); });
     });
   }
 
@@ -687,13 +732,13 @@
     '</div>';
   }
 
-  function attachAddToShopping(day) {
-    var btn = document.querySelector('.day-card[data-day="' + day + '"] .add-to-shopping');
-    if (btn) btn.addEventListener('click', function () { addRecipeToShopping(day); });
+  function attachAddToShopping(day, meal) {
+    var btn = document.querySelector('.day-card[data-day="' + day + '"][data-meal="' + meal + '"] .add-to-shopping');
+    if (btn) btn.addEventListener('click', function () { addRecipeToShopping(day, meal); });
   }
 
-  async function onRecipeToggle(day) {
-    var d = state.mealPlan[day];
+  async function onRecipeToggle(day, meal) {
+    var d = state.mealPlan[day][meal];
     if (d.recipeVisible) {
       d.recipeVisible = false;
       renderMeals();
@@ -703,7 +748,7 @@
     d.recipeVisible = true;
     if (d.recipe) {
       renderMeals();
-      attachAddToShopping(day);
+      attachAddToShopping(day, meal);
       await saveKey('mealPlan', state.mealPlan);
       return;
     }
@@ -725,19 +770,19 @@
     }
     d.recipeLoading = false;
     renderMeals();
-    attachAddToShopping(day);
+    attachAddToShopping(day, meal);
     await saveKey('mealPlan', state.mealPlan);
   }
 
-  async function addRecipeToShopping(day) {
-    var recipe = state.mealPlan[day].recipe;
+  async function addRecipeToShopping(day, meal) {
+    var recipe = state.mealPlan[day][meal].recipe;
     if (!recipe) return;
     (recipe.ingredients || []).forEach(function (i) {
       state.shoppingList.push({ id: uid(), text: i.amount ? (i.name + ' — ' + i.amount) : i.name, done: false });
     });
     await saveKey('shoppingList', state.shoppingList);
     renderShopping();
-    var btn = document.querySelector('.day-card[data-day="' + day + '"] .add-to-shopping');
+    var btn = document.querySelector('.day-card[data-day="' + day + '"][data-meal="' + meal + '"] .add-to-shopping');
     if (btn) {
       btn.textContent = 'Добавлено ✓';
       setTimeout(function () { btn.textContent = 'Добавить продукты в список покупок'; }, 1500);
@@ -755,20 +800,28 @@
     btn.innerHTML = '<span class="spinner"></span>Подбираю меню...';
     try {
       var prefsText = state.mealPrefs ? state.mealPrefs : 'нет особых пожеланий';
+      var mealsRu = state.mealTypes.map(function (t) { return MEAL_TYPE_LABELS[t].toLowerCase(); }).join(', ');
+      var shapeForDay = '{' + state.mealTypes.map(function (t) {
+        return '"' + t + '":{"dish":"название","short":"короткое описание с примерным временем готовки"}';
+      }).join(',') + '}';
       var text = await callClaude(
         'Ты помощник по планированию домашнего питания. Отвечай только в формате JSON, без markdown, без пояснений.',
-        'Составь меню ужинов на неделю для ' + state.mealPeople + ' человек. Пожелания: ' + prefsText + '. Блюда должны быть разными, простыми и реалистичными для домашней готовки. Формат JSON: {"monday":{"dish":"название","short":"одна короткая фраза с описанием и примерным временем готовки"},"tuesday":{},"wednesday":{},"thursday":{},"friday":{},"saturday":{},"sunday":{}} — для каждого дня заполни поля dish и short.',
-        1000
+        'Составь меню на неделю (' + mealsRu + ') для ' + state.mealPeople + ' человек. Пожелания: ' + prefsText + '. Блюда должны быть разными в течение недели, простыми и реалистичными для домашней готовки. Для каждого дня недели и каждого приёма пищи (' + mealsRu + ') укажи "dish" (название) и "short" (короткое описание с примерным временем готовки). Формат JSON: {"monday":' + shapeForDay + ',"tuesday":' + shapeForDay + ',"wednesday":' + shapeForDay + ',"thursday":' + shapeForDay + ',"friday":' + shapeForDay + ',"saturday":' + shapeForDay + ',"sunday":' + shapeForDay + '}',
+        1500
       );
       var plan = parseJSON(text);
       var newPlan = {};
       DAYS.forEach(function (day) {
-        newPlan[day] = {
-          dish: (plan[day] && plan[day].dish) || '—',
-          short: (plan[day] && plan[day].short) || '',
-          recipe: null,
-          recipeVisible: false
-        };
+        newPlan[day] = {};
+        state.mealTypes.forEach(function (mt) {
+          var entry = plan[day] && plan[day][mt];
+          newPlan[day][mt] = {
+            dish: (entry && entry.dish) || '—',
+            short: (entry && entry.short) || '',
+            recipe: null,
+            recipeVisible: false
+          };
+        });
       });
       state.mealPlan = newPlan;
       await saveKey('mealPlan', state.mealPlan);
@@ -791,7 +844,7 @@
     updateAssigneeOptions();
     var container = document.getElementById('chore-list');
     if (state.chores.length === 0) {
-      container.innerHTML = '<div class="empty-state"><span>🧹</span>Список дел пуст.<br>Добавьте первое дело по дому.</div>';
+      container.innerHTML = '<div class="empty-state"><span>📋</span>Список заданий пуст.<br>Добавьте первое задание.</div>';
       return;
     }
     container.innerHTML = state.chores.map(function (c) {
@@ -832,7 +885,7 @@
     input.value = '';
     await saveKey('chores', state.chores);
     renderChores();
-    if (assignee) notifyTelegram(assignee, 'Новое дело по дому: ' + text);
+    if (assignee) notifyTelegram(assignee, 'Новое задание: ' + text);
   }
 
   async function onResetWeekChores() {
@@ -847,7 +900,7 @@
       return;
     }
     if (state.chores.length === 0) {
-      alert('Сначала добавьте дела по дому.');
+      alert('Сначала добавьте задания.');
       return;
     }
     var btn = document.getElementById('ai-distribute-chores');
@@ -856,8 +909,8 @@
     try {
       var choreTexts = state.chores.map(function (c) { return c.text; });
       var text = await callClaude(
-        'Ты помогаешь справедливо распределять домашние дела между членами семьи. Отвечай только в формате JSON.',
-        'Дела по дому: ' + JSON.stringify(choreTexts) + '. Члены семьи: ' + JSON.stringify(state.familyMembers) + '. Распредели дела как можно более равномерно. Ответь JSON-объектом, где ключи — это дела ровно как они написаны выше, а значения — имя ответственного из списка членов семьи. Формат: {"дело1":"имя","дело2":"имя"}',
+        'Ты помогаешь справедливо распределять задания между членами семьи. Отвечай только в формате JSON.',
+        'Задания: ' + JSON.stringify(choreTexts) + '. Члены семьи: ' + JSON.stringify(state.familyMembers) + '. Распредели задания как можно более равномерно. Ответь JSON-объектом, где ключи — это задания ровно как они написаны выше, а значения — имя ответственного из списка членов семьи. Формат: {"задание1":"имя","задание2":"имя"}',
         1000
       );
       var mapping = parseJSON(text);
@@ -866,10 +919,10 @@
       renderChores();
       notifyAllAssignees();
     } catch (e) {
-      alert('Не получилось распределить дела. Попробуйте ещё раз.\n\n' + (e.message || ''));
+      alert('Не получилось распределить задания. Попробуйте ещё раз.\n\n' + (e.message || ''));
     }
     btn.disabled = false;
-    btn.innerHTML = '🤖 Распределить дела с помощью ИИ';
+    btn.innerHTML = '🤖 Распределить задания с помощью ИИ';
   }
 
   // ============ SHOPPING ============
@@ -1031,6 +1084,20 @@
     renderChatMessage('assistant', 'Привет! Спросите меня о рецептах, домашних советах или о чём угодно — постараюсь помочь.');
 
     document.getElementById('generate-meal-plan').addEventListener('click', onGenerateMealPlan);
+    document.querySelectorAll('.meal-type-cb').forEach(function (cb) {
+      cb.addEventListener('change', async function () {
+        var checked = [];
+        document.querySelectorAll('.meal-type-cb').forEach(function (c) {
+          if (c.checked) checked.push(c.value);
+        });
+        if (checked.length === 0) {
+          cb.checked = true;
+          checked = [cb.value];
+        }
+        state.mealTypes = MEAL_TYPES_ORDER.filter(function (t) { return checked.indexOf(t) !== -1; });
+        await saveKey('mealTypes', state.mealTypes);
+      });
+    });
     document.getElementById('add-chore-form').addEventListener('submit', onAddChore);
     document.getElementById('reset-week-chores').addEventListener('click', onResetWeekChores);
     document.getElementById('ai-distribute-chores').addEventListener('click', onAiDistributeChores);
@@ -1053,8 +1120,25 @@
 
     document.getElementById('shopping-mic').addEventListener('click', function () {
       var btn = this;
-      startVoiceInput(btn, function (text) {
-        document.getElementById('shopping-text').value = text;
+      startVoiceInput(btn, async function (text) {
+        btn.innerHTML = '<span class="spinner"></span>';
+        try {
+          var resultText = await callClaude(
+            'Пользователь продиктовал список покупок на русском, возможно сразу несколько товаров. Разбей фразу на отдельные товары (каждый товар — отдельный элемент). Не объединяй и не меняй названия. Ответь ТОЛЬКО JSON-массивом строк, например ["молоко","хлеб","яйца"].',
+            text,
+            300
+          );
+          var items = parseJSONArray(resultText);
+          items.forEach(function (item) {
+            var t = String(item || '').trim();
+            if (t) state.shoppingList.push({ id: uid(), text: t, done: false });
+          });
+          await saveKey('shoppingList', state.shoppingList);
+          renderShopping();
+        } catch (e) {
+          document.getElementById('shopping-text').value = text;
+        }
+        btn.innerHTML = '🎤';
       });
     });
 
