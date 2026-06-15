@@ -763,6 +763,7 @@
             '<p class="dish-short">' + esc(d.short) + '</p>' +
           '</div>' +
           '<button class="recipe-toggle" data-day="' + day + '" data-meal="' + mt + '">' + (d.recipeVisible ? 'Скрыть рецепт' : 'Рецепт') + '</button>' +
+          '<button class="icon-btn refresh-btn" data-day="' + day + '" data-meal="' + mt + '" title="Предложить другое блюдо">🔄</button>' +
           recipeHtml +
         '</div>');
       });
@@ -771,6 +772,9 @@
 
     container.querySelectorAll('.recipe-toggle').forEach(function (btn) {
       btn.addEventListener('click', function () { onRecipeToggle(btn.dataset.day, btn.dataset.meal); });
+    });
+    container.querySelectorAll('.refresh-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { onRefreshDish(btn, btn.dataset.day, btn.dataset.meal); });
     });
     container.querySelectorAll('.add-to-shopping').forEach(function (btn) {
       var card = btn.closest('.day-card');
@@ -916,6 +920,40 @@
     btn.textContent = 'Составить меню на неделю';
   }
 
+  async function onRefreshDish(btn, day, meal) {
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      var allDishes = [];
+      DAYS.forEach(function (dy) {
+        MEAL_TYPES_ORDER.forEach(function (mt) {
+          var entry = state.mealPlan[dy] && state.mealPlan[dy][mt];
+          if (entry && entry.dish) allDishes.push(entry.dish);
+        });
+      });
+      var prefsText = state.mealPrefs ? state.mealPrefs : 'нет особых пожеланий';
+      var text = await callClaude(
+        'Ты помощник по планированию домашнего питания. Отвечай только в формате JSON, без markdown, без пояснений.',
+        'Предложи другое блюдо на ' + MEAL_TYPE_LABELS[meal].toLowerCase() + ' (' + DAY_LABELS[day].toLowerCase() + ') для ' + state.mealPeople + ' человек. Оно должно отличаться от этих блюд: ' + JSON.stringify(allDishes) + '. Пожелания: ' + prefsText + '. Формат JSON: {"dish":"название","short":"короткое описание с примерным временем готовки"}',
+        300
+      );
+      var entry = parseJSON(text);
+      state.mealPlan[day][meal] = {
+        dish: entry.dish || state.mealPlan[day][meal].dish,
+        short: entry.short || '',
+        recipe: null,
+        recipeVisible: false
+      };
+      await saveKey('mealPlan', state.mealPlan);
+      renderMeals();
+    } catch (e) {
+      alert('Не получилось подобрать другое блюдо. Попробуйте ещё раз.\n\n' + (e.message || ''));
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  }
+
   // ============ CHORES ============
   function updateAssigneeOptions() {
     var select = document.getElementById('chore-assignee');
@@ -937,10 +975,21 @@
         '<input type="checkbox" data-id="' + c.id + '" class="chore-check" ' + (c.done ? 'checked' : '') + '>' +
         '<span class="chore-text">' + esc(c.text) + '</span>' +
         (c.assignee ? '<span class="chore-assignee">' + esc(c.assignee) + '</span>' : '') +
+        (c.assignee ? '<button class="icon-btn remind-btn" data-id="' + c.id + '" aria-label="Напомнить" title="Напомнить ' + esc(c.assignee) + '">🔔</button>' : '') +
         '<button class="delete-btn" data-id="' + c.id + '" aria-label="Удалить">×</button>' +
       '</div>';
     }).join('');
 
+    container.querySelectorAll('.remind-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var chore = state.chores.find(function (c) { return c.id === btn.dataset.id; });
+        if (!chore || !chore.assignee) return;
+        await notifyTelegram(chore.assignee, 'Напоминание: ' + chore.text);
+        var original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      });
+    });
     container.querySelectorAll('.chore-check').forEach(function (cb) {
       cb.addEventListener('change', async function () {
         var chore = state.chores.find(function (c) { return c.id === cb.dataset.id; });
