@@ -525,9 +525,13 @@
     btn.classList.add('recording');
     rec.onresult = function (e) {
       var text = e.results[0][0].transcript;
+      try { rec.stop(); } catch (err) {}
       onResult(text);
     };
-    rec.onerror = function () { btn.classList.remove('recording'); };
+    rec.onerror = function () {
+      try { rec.stop(); } catch (err) {}
+      btn.classList.remove('recording');
+    };
     rec.onend = function () { btn.classList.remove('recording'); };
     rec.start();
   }
@@ -604,6 +608,11 @@
   function parseJSON(text) {
     var clean = text.trim();
     clean = clean.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+    var start = clean.indexOf('{');
+    var end = clean.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      clean = clean.slice(start, end + 1);
+    }
     return JSON.parse(clean);
   }
 
@@ -703,10 +712,9 @@
     renderMeals();
     try {
       var text = await callClaude(
-        'Ты кулинарный помощник. Сначала найди в интернете подходящий рецепт для указанного блюда, затем перепиши его кратко своими словами на русском. В самом конце ответь ТОЛЬКО JSON-объектом, без какого-либо текста до или после него: {"ingredients":[{"name":"...","amount":"..."}],"steps":["...","..."]}. Не больше 10 ингредиентов и 8 шагов.',
+        'Ты кулинарный помощник. Отвечай ТОЛЬКО JSON-объектом, без какого-либо текста до или после него: {"ingredients":[{"name":"...","amount":"..."}],"steps":["...","..."]}. Не больше 10 ингредиентов и 8 шагов. Рецепт должен быть реалистичным и проверенным, для обычной домашней готовки.',
         'Дай рецепт блюда "' + d.dish + '" на ' + state.mealPeople + ' человек.',
-        1000,
-        [{ type: 'web_search_20250305', name: 'web_search' }]
+        1000
       );
       d.recipe = parseJSON(text);
     } catch (e) {
