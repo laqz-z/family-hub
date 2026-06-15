@@ -563,14 +563,13 @@
   }
 
   // ---------- Claude API ----------
-  async function callClaude(system, userText, maxTokens, tools) {
+  async function callClaude(system, userText, maxTokens) {
     var payload = {
       model: 'claude-sonnet-4-6',
       max_tokens: maxTokens || 1000,
       system: system,
       messages: [{ role: 'user', content: userText }]
     };
-    if (tools) payload.tools = tools;
     var base = (state.telegramBackendUrl || BACKEND_URL).replace(/\/+$/, '');
     var response = await fetch(base + '/claude', {
       method: 'POST',
@@ -710,15 +709,19 @@
     }
     d.recipeLoading = true;
     renderMeals();
-    try {
-      var text = await callClaude(
-        'Ты кулинарный помощник. Отвечай ТОЛЬКО JSON-объектом, без какого-либо текста до или после него: {"ingredients":[{"name":"...","amount":"..."}],"steps":["...","..."]}. Не больше 10 ингредиентов и 8 шагов. Рецепт должен быть реалистичным и проверенным, для обычной домашней готовки.',
-        'Дай рецепт блюда "' + d.dish + '" на ' + state.mealPeople + ' человек.',
-        1000
-      );
-      d.recipe = parseJSON(text);
-    } catch (e) {
-      d.recipe = { ingredients: [], steps: ['Не получилось загрузить рецепт. Попробуйте ещё раз.', (e.message || '')] };
+    var sysPrompt = 'Ты кулинарный помощник. Отвечай ТОЛЬКО JSON-объектом, без какого-либо текста до или после него — даже без названия блюда: {"ingredients":[{"name":"...","amount":"..."}],"steps":["...","..."]}. Не больше 10 ингредиентов и 8 шагов. Рецепт должен быть реалистичным и проверенным, для обычной домашней готовки.';
+    var userPrompt = 'Дай рецепт блюда "' + d.dish + '" на ' + state.mealPeople + ' человек.';
+    var lastErr = null;
+    for (var attempt = 0; attempt < 2 && !d.recipe; attempt++) {
+      try {
+        var text = await callClaude(sysPrompt, userPrompt, 1000);
+        d.recipe = parseJSON(text);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!d.recipe) {
+      d.recipe = { ingredients: [], steps: ['Не получилось загрузить рецепт. Попробуйте ещё раз.', (lastErr && lastErr.message) || ''] };
     }
     d.recipeLoading = false;
     renderMeals();
